@@ -28,8 +28,15 @@ use strict;
 use warnings;
 use Flickr::API;
 
+$|++;
+
 my $flickr_key;
 my $flickr_sec;
+my $flickr_auth_token;
+my $flickr_search_req;
+my $flickr_search_arg;
+my @exif_tags;
+my %format_tags;
 
 my $cfgfile = 'flenstag.conf';
 eval `cat "$cfgfile"` if (-r $cfgfile);
@@ -38,3 +45,130 @@ my $api = new Flickr::API({
     key    => $flickr_key,
     secret => $flickr_sec,
 });
+
+print "Searching photos: ";
+my $resp = $api->execute_method($flickr_search_req, $flickr_search_arg);
+unless($resp->{success}) {
+    print "FAILED\n";
+    print STDERR "$resp->{error_code}: $resp->{error_message}\n";
+    exit(1);
+}
+print "OK\n";
+
+sub grep_exif($$) {
+    my $exif = shift;
+    my $tags = shift;
+    my %exif = ();
+
+    if(exists($exif->{name}) && $exif->{name} eq 'exif') {
+	foreach my $t (@{$tags}) {
+	    if ($exif->{attributes}->{tag} eq $t) {
+		return ($t => $exif->{children}->[1]->{children}->[0]->{content});
+	    }
+	}
+	return ();
+    }
+
+    foreach my $e (@{$exif->{children}}) {
+	%exif = (%exif, &grep_exif($e, $tags));
+    }
+    return %exif;
+}
+
+sub grep_content($$) {
+    my $tree = shift;
+    my $name = shift;
+
+    if(exists($tree->{name}) && $tree->{name} eq $name) {
+	return $tree->{children}->[0]->{content};
+    }
+
+    my $res;
+    foreach my $c (@{$tree->{children}}) {
+	$res = &grep_content($c, $name);
+	return $res if(defined($res));
+    }
+
+    return undef;
+}
+
+sub grep_photos($) {
+    my $s = shift;
+
+    if(exists($s->{name}) && $s->{name} eq 'photo') {
+	my $exif = $api->execute_method(
+	    'flickr.photos.getExif',
+	    {photo_id => $s->{attributes}->{id}}
+	);
+	unless($exif->{success}) {
+	    print STDERR "Failed to get exif data of #$s->{attributes}->{id} ($s->{attributes}->{title}):\n";
+	    print STDERR " $exif->{error_code}: $exif->{error_message}\n";
+	}
+	else {
+	    my %exif = grep_exif($exif->{tree}, [@exif_tags]);
+	    my @tags;
+	    foreach my $k (keys %exif) {
+		my $v = $exif{$k};
+		if(exists($format_tags{$k})) {
+		    foreach my $re (keys %{$format_tags{$k}}) {
+			if($v =~ /$re/) {
+			    eval "\$v =~ s/$re/$format_tags{$k}->{$re}/;";
+			    last;
+			}
+		    }
+		}
+		push(@tags, $v);
+	    }
+
+	    if($#tags < 0) {
+		print "-";
+		return;
+	    }
+	    print "+";
+
+	    my $add = $api->execute_method(
+	        'flickr.photos.addTags',
+	        {
+		    photo_id => $s->{attributes}->{id},
+		    auth_token => $flickr_auth_token,
+		    tags => '"'.join('" "', @tags).'"',
+	        }
+	    );
+	    unless($add->{success}) {
+	        print STDERR "Failed set tags of #$s->{attributes}->{id} ($s->{attributes}->{title}):\n";
+	        print STDERR " $add->{error_code}: $add->{error_message}\n";
+
+	        if($add->{error_code} == 99) {
+		    my $frob = $api->execute_method('flickr.auth.getFrob');
+		    unless($frob->{success}) {
+			print STDERR "Failed get frob:\n";
+			print STDERR " $frob->{error_code}: $frob->{error_message}\n";
+			exit(2);
+		    }
+		    $frob = grep_content($frob->{tree}, 'frob');
+		    print STDERR "\nFor permssion granting you have to open:\n";
+		    print STDERR $api->request_auth_url('write', $frob), "\n";
+		    print STDERR "\nPress return if you've finished authorizing $0.\n";
+		    <>;
+		    my $token = $api->execute_method('flickr.auth.getToken', {frob => $frob});
+		    unless($token->{success}) {
+			print STDERR "Failed get token:\n";
+			print STDERR " $token->{error_code}: $token->{error_message}\n";
+			exit(2);
+		    }
+		    print STDERR "TOKEN: ".grep_content($token->{tree}, 'token')."\n";
+		    exit(3);
+	        }
+	    }
+	}
+
+	return;
+    }
+
+    foreach my $c (@{$s->{children}}) {
+	&grep_photos($c);
+    }
+}
+
+print "Updating photos: ";
+grep_photos($resp->{tree});
