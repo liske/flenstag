@@ -30,9 +30,10 @@ use Flickr::API;
 
 $|++;
 
-my $flickr_key;
-my $flickr_sec;
+my $flickr_key = 'f12c291cd40151cc5216b54e6413b2c2';
+my $flickr_sec = '0add547fc6a91654';
 my $flickr_auth_token;
+
 my $flickr_search_req;
 my $flickr_search_arg;
 my @exif_tags;
@@ -42,8 +43,10 @@ my $flickr_search_upload_date;
 
 my $cfgfile = 'flenstag.conf';
 my $datfile = 'flenstag.dat';
+my $authfile = 'flenstag.auth';
 eval `cat "$cfgfile"` if (-r $cfgfile);
 eval `cat "$datfile"` if (-r $datfile);
+eval `cat "$authfile"` if (-r $authfile);
 
 my $api;
 
@@ -175,8 +178,16 @@ sub grep_photos($) {
 			print STDERR " $token->{error_code}: $token->{error_message}\n";
 			exit(2);
 		    }
-		    print STDERR "TOKEN: ".grep_content($token->{tree}, 'token')."\n";
-		    exit(3);
+
+		    my $t = grep_content($token->{tree}, 'token');
+		    open(HAUTH, '>', $authfile) || die;
+		    print HAUTH <<EOA;
+\$flickr_auth_token = '$t';
+EOA
+		    close(HAUTH);
+
+		    print STDERR "Authorization token saved, trying to restart...\n\n";
+		    exec($0);
 	        }
 	    }
 	}
@@ -191,7 +202,7 @@ sub grep_photos($) {
 
 sub save_and_quit {
     if(exists($upload_dates{max})) {
-	print 'Saving tagged time range: ', scalar localtime($upload_dates{min}), ' - ', scalar localtime($upload_dates{max}), "\n";
+	print "\nSaving tagged time range: ", scalar localtime($upload_dates{min}), ' - ', scalar localtime($upload_dates{max}), "\n";
 	open(HDAT, '>', $datfile) || die;
     print HDAT <<EOD;
 \$upload_dates{min} = $upload_dates{min};
@@ -210,6 +221,9 @@ $api = new Flickr::API({
 });
 
 print "Searching photos: ";
+$flickr_search_arg->{"${flickr_search_upload_date}_upload_date"} = $upload_dates{$flickr_search_upload_date}
+    if(defined($flickr_search_upload_date) &&
+       exists($upload_dates{$flickr_search_upload_date}));
 my $resp = $api->execute_method($flickr_search_req, $flickr_search_arg);
 unless($resp->{success}) {
     print "FAILED\n";
