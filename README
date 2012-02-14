@@ -1,0 +1,24 @@
+flenstag - Flickr Lens Tagger
+=============================
+
+flenstag scans photos from Flickr and adds appropriate tags generated
+from the EXIF data of the photos. The default configuration tags:
+
+    camera model,
+    lens model,
+    ISO speed,
+    focal length and
+    exposure time
+    aperture fnumber
+
+retrieved from the EXIF data.
+
+flenstag is written in Perl and requires Flickr::API. The script saves
+runtime data and expects the configuration file in the current directory:
+
+    flenstag.conf: configuration file
+    flenstag.dat : tracks upload dates (might be used for filtering)
+    flenstag.auth: Flickr API authentication
+
+The flenstag.conf must exist before running flenstag (take
+flenstag.conf.ex as a template).
