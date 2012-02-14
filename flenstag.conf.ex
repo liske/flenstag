@@ -15,7 +15,7 @@ $flickr_search_upload_date = 'min';
 
 
 # Which EXIF fields should become tags?
-@exif_tags = qw(Model LensModel Lens ISO FocalLength);
+@exif_tags = qw(Model LensModel Lens ISO FocalLength ExposureTime);
 
 # Regex pattern converting lens strings.
 my $lens = {
